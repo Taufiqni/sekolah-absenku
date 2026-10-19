@@ -171,101 +171,148 @@ useEffect(() => {
     setNotice('')
   }
 
-  async function markAttendance(kind) {
-    const now = new Date()
-    const time = now.toLocaleTimeString('id-ID', {
-      hour: '2-digit',
-      minute: '2-digit'
-    })
-
-    if (kind === 'checkIn') {
-      if (attendance.checkIn) {
-        return setNotice('Absen masuk hari ini sudah tercatat.')
-      }
-
-      setAttendance({
-        checkIn: time,
-        checkOut: '',
-        status: 'Hadir'
-      })
-
-      setHistory(prev => [
-        {
-          date: todayDate(),
-          day: 'Hari ini',
-          masuk: time,
-          pulang: '—',
-          status: 'Hadir'
-        },
-        ...prev.filter(row => row.day !== 'Hari ini')
-      ])
-
-      setNotice(
-        onlineMode
-          ? 'Tombol siap digunakan. Untuk menyimpan absensi online, profil siswa dan kebijakan database harus sudah disiapkan.'
-          : 'Absen masuk tercatat pada mode demo.'
-      )
-    } else {
-      if (!attendance.checkIn) {
-        return setNotice('Lakukan absen masuk terlebih dahulu.')
-      }
-
-      if (attendance.checkOut) {
-        return setNotice('Absen pulang hari ini sudah tercatat.')
-      }
-
-      setAttendance(prev => ({
-        ...prev,
-        checkOut: time
-      }))
-
-      setHistory(prev =>
-        prev.map((row, index) =>
-          index === 0 ? { ...row, pulang: time } : row
-        )
-      )
-
-      setNotice(
-        'Absen pulang tercatat pada tampilan ini. Simpan online memerlukan konfigurasi database lanjutan.'
-      )
-    }
+ 
+async function markAttendance(kind) {
+  if (!onlineMode || !user || !supabase) {
+    setNotice('Mode demo: absensi hanya tersimpan di tampilan ini.')
+    return
   }
 
-  const nav = useMemo(() => {
-    if (role === 'guru') {
-      return [
-        ['dashboard', 'Ringkasan', Home],
-        ['students', 'Daftar Siswa', Users],
-        ['attendance', 'Rekap Absensi', ClipboardList],
-        ['help', 'Bantuan', HelpCircle],
-      ]
+  const now = new Date()
+  const time = now.toLocaleTimeString('id-ID', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Asia/Jakarta'
+  })
+
+  const attendanceDate = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(now)
+
+  // Cari data siswa milik akun yang sedang login.
+  const { data: student, error: studentError } = await supabase
+    .from('students')
+    .select('id')
+    .eq('user_id', user.id)
+    .maybeSingle()
+
+  if (studentError || !student) {
+    setNotice('Data siswa tidak ditemukan. Periksa profil dan data siswa di Supabase.')
+    return
+  }
+
+  if (kind === 'checkIn') {
+    const { data: existing, error: findError } = await supabase
+      .from('attendance')
+      .select('id, check_in, check_out, status')
+      .eq('student_id', student.id)
+      .eq('attendance_date', attendanceDate)
+      .maybeSingle()
+
+    if (findError) {
+      setNotice(`Gagal memeriksa absensi: ${findError.message}`)
+      return
     }
 
-    if (role === 'admin') {
-      return [
-        ['dashboard', 'Ringkasan', Home],
-        ['students', 'Data Siswa', Users],
-        ['attendance', 'Semua Absensi', ClipboardList],
-        ['settings', 'Pengaturan', Settings],
-      ]
+    if (existing?.check_in) {
+      setNotice('Absen masuk hari ini sudah tercatat.')
+      return
     }
 
-    if (role === 'orang_tua') {
-      return [
-        ['dashboard', 'Ringkasan Anak', Home],
-        ['history', 'Riwayat Absensi', History],
-        ['notifications', 'Notifikasi', Bell],
-        ['help', 'Bantuan', HelpCircle],
-      ]
+    const { data, error } = await supabase
+      .from('attendance')
+      .insert({
+        student_id: student.id,
+        attendance_date: attendanceDate,
+        check_in: now.toISOString(),
+        status: 'hadir',
+        recorded_by: user.id
+      })
+      .select()
+      .single()
+
+    if (error) {
+      setNotice(`Gagal menyimpan absen masuk: ${error.message}`)
+      return
     }
 
-    return [
-      ['dashboard', 'Beranda', Home],
-      ['history', 'Riwayat Absensi', History],
-      ['qr', 'Kartu QR', QrCode],
-      ['help', 'Bantuan', HelpCircle],
-    ]
-  }, [role])
+    setAttendance({
+      checkIn: time,
+      checkOut: '',
+      status: 'Hadir'
+    })
+
+    setHistory(prev => [
+      {
+        date: attendanceDate,
+        day: 'Hari ini',
+        masuk: time,
+        pulang: '—',
+        status: 'Hadir'
+      },
+      ...prev.filter(row => row.date !== attendanceDate)
+    ])
+
+    setNotice('Absen masuk berhasil disimpan ke database.')
+  } else {
+    const { data: existing, error: findError } = await supabase
+      .from('attendance')
+      .select('id, check_in, check_out')
+      .eq('student_id', student.id)
+      .eq('attendance_date', attendanceDate)
+      .maybeSingle()
+
+    if (findError) {
+      setNotice(`Gagal memeriksa absensi: ${findError.message}`)
+      return
+    }
+
+    if (!existing?.check_in) {
+      setNotice('Lakukan absen masuk terlebih dahulu.')
+      return
+    }
+
+    if (existing.check_out) {
+      setNotice('Absen pulang hari ini sudah tercatat.')
+      return
+    }
+
+    const { error } = await supabase
+      .from('attendance')
+      .update({ check_out: now.toISOString() })
+      .eq('id', existing.id)
+
+    if (error) {
+      setNotice(`Gagal menyimpan absen pulang: ${error.message}`)
+      return
+    }
+
+    setAttendance(prev => ({
+      ...prev,
+      checkIn: new Date(existing.check_in).toLocaleTimeString('id-ID', {
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Asia/Jakarta'
+      }),
+      checkOut: time,
+      status: 'Hadir'
+    }))
+
+    setHistory(prev =>
+      prev.map(row =>
+        row.date === attendanceDate
+          ? { ...row, pulang: time }
+          : row
+      )
+    )
+
+    setNotice('Absen pulang berhasil disimpan ke database.')
+  }
+}
+
 
   const isDemo = user && !onlineMode
 
