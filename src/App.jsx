@@ -310,12 +310,46 @@ async function markAttendance(kind) {
     )
 
     setNotice('Absen pulang berhasil disimpan ke database.')
-  }
+   }
 }
 
+  const nav = useMemo(() => {
+    if (role === 'guru') {
+      return [
+        ['dashboard', 'Ringkasan', Home],
+        ['students', 'Daftar Siswa', Users],
+        ['attendance', 'Rekap Absensi', ClipboardList],
+        ['help', 'Bantuan', HelpCircle],
+      ]
+    }
+
+    if (role === 'admin') {
+      return [
+        ['dashboard', 'Ringkasan', Home],
+        ['students', 'Data Siswa', Users],
+        ['attendance', 'Semua Absensi', ClipboardList],
+        ['settings', 'Pengaturan', Settings],
+      ]
+    }
+
+    if (role === 'orang_tua') {
+      return [
+        ['dashboard', 'Ringkasan Anak', Home],
+        ['history', 'Riwayat Absensi', History],
+        ['notifications', 'Notifikasi', Bell],
+        ['help', 'Bantuan', HelpCircle],
+      ]
+    }
+
+    return [
+      ['dashboard', 'Beranda', Home],
+      ['history', 'Riwayat Absensi', History],
+      ['qr', 'Kartu QR', QrCode],
+      ['help', 'Bantuan', HelpCircle],
+    ]
+  }, [role])
 
   const isDemo = user && !onlineMode
-
   if (!user) {
     return (
       <main className="login-shell">
